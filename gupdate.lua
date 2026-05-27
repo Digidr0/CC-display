@@ -1,8 +1,8 @@
--- update.lua
--- Force-updates project files from dev server.
--- Usage: update
+-- gupdate.lua
+-- Bulk-updates ALL project files from GitHub.
+-- Usage: gupdate
 
-local host = "http://localhost:8000"
+local base = "https://raw.githubusercontent.com/Digidr0/CC-display/main"
 local files = {
   "startup.lua",
   "tank_sender.lua",
@@ -12,21 +12,23 @@ local files = {
   "barrel_sniffer.lua",
   "debug.lua",
   "sniff.lua",
+  "update.lua",
+  "gupdate.lua",
 }
 
 for _, file in ipairs(files) do
   if fs.exists(file) then
     fs.delete(file)
   end
-  local url = host .. "/" .. file
+  local url = base .. "/" .. file
   write("Downloading " .. file .. "... ")
   shell.run("wget " .. url .. " " .. file)
   if fs.exists(file) then
     print("OK")
   else
-    print("FAILED — dev server running?")
+    print("FAILED — no internet?")
   end
 end
 
 print("")
-print("Run: startup.lua")
+print("Run: startup")

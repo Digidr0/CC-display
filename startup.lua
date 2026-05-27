@@ -511,6 +511,11 @@ local BG_STORAGE_FILL = colors.purple  -- custom #485b6e via palette
 local RED_SQ_BG = colors.red
 local ARROW_U = string.char(30)  -- ▲ (CP437)
 local ARROW_D = string.char(31)  -- ▼ (CP437)
+local ARROW_R = string.char(16)  -- ► (CP437)
+
+-- Per-silo arrow flash tracking
+local siloPrevItems = {}   -- [computerId] = totalItems
+local siloArrowFlash = {}  -- [computerId] = { dir, deadline }
 
 local function drawStorageTower(cx, cy, siloInfos)
   -- siloInfos: array of { label, usedSlots, totalSlots, items }
@@ -533,6 +538,7 @@ local function drawStorageTower(cx, cy, siloInfos)
   local totalItems = 0
   local totalUsed = 0
   local totalMax = 0
+  local now = os.clock()
 
   for idx, info in ipairs(siloInfos) do
     local compStartY = cy
@@ -540,9 +546,23 @@ local function drawStorageTower(cx, cy, siloInfos)
     local total = info.totalSlots or 1
     totalUsed = totalUsed + used
     totalMax = totalMax + total
+
+    -- Per-silo item count for flash detection
+    local siloCount = 0
     for _, item in ipairs(info.items or {}) do
-      totalItems = totalItems + item.count
+      siloCount = siloCount + item.count
     end
+    totalItems = totalItems + siloCount
+
+    -- Detect change and set flash
+    local prev = siloPrevItems[info.id]
+    if prev ~= nil and prev ~= siloCount then
+      siloArrowFlash[info.id] = {
+        dir = siloCount > prev and "up" or "down",
+        deadline = now + 0.5,
+      }
+    end
+    siloPrevItems[info.id] = siloCount
 
     local pct = math.min(used / total, 1.0)
     local filledCells = math.floor(pct * COMP_TOTAL)
@@ -581,10 +601,17 @@ local function drawStorageTower(cx, cy, siloInfos)
       monitor.write(vt)  -- left border
 
       if row == 1 then
-        -- First (top) fill row: ▼ on left
+        -- First (top) fill row: ▼ on left with flash color
+        local flash = siloArrowFlash[info.id]
+        if flash and flash.dir == "up" and now < flash.deadline then
+          monitor.setTextColor(colors.green)
+        end
         monitor.write(ARROW_D)
+        if flash and flash.dir == "up" and now < flash.deadline then
+          monitor.setTextColor(WHITE)
+        end
       elseif row == COMP_ROWS then
-        -- Last (bottom) fill row: ▲ on right, fill comes first
+        -- Last (bottom) fill row: → on right, fill comes first
       else
         -- Middle rows: blank left
         monitor.write(" ")
@@ -601,7 +628,14 @@ local function drawStorageTower(cx, cy, siloInfos)
           monitor.write(string.rep(" ", emptyInRow))
         end
         monitor.setBackgroundColor(BG_BAR)
-        monitor.write(ARROW_U)
+        local flash = siloArrowFlash[info.id]
+        if flash and flash.dir == "down" and now < flash.deadline then
+          monitor.setTextColor(colors.red)
+        end
+        monitor.write(ARROW_R)
+        if flash and flash.dir == "down" and now < flash.deadline then
+          monitor.setTextColor(WHITE)
+        end
       else
         if fillInRow > 0 then
           monitor.setBackgroundColor(BG_STORAGE_FILL)
@@ -750,33 +784,115 @@ local function drawSiloDetail(info)
 
   local pct = math.min((info.usedSlots or 0) / (info.totalSlots or 1), 1.0)
   local label = info.label or "Storage"
-
-  -- ── Full-width item list with compact header ──
   local RY = 2
 
-  -- Row 1: Back button + label + usage bar
+  -- Row 1: Back button + label centered
   if hasColor then
     monitor.setBackgroundColor(BG_STORAGE_FILL)
     monitor.setTextColor(WHITE)
   end
-  monitor.setCursorPos(2, RY)
-  monitor.write("[ < Back ]  " .. label)
+  local header = "[ < Back ]  " .. label
   local pctStr = math.floor(pct * 100) .. "%"
+  monitor.setCursorPos(2, RY)
+  monitor.write(header)
   if hasColor then monitor.setTextColor(LIGHT_GRAY) end
   monitor.setCursorPos(w - #pctStr - 1, RY)
   monitor.write(pctStr)
   monitor.setBackgroundColor(BG_EMPTY)
+  RY = RY + 1
+
+  -- ── Storage visual (compartment icon) ──
+  local COMP_W = 9
+  local COMP_INNER = 7
+  local COMP_ROWS = 6
+  local ROW_CELLS = 6
+  local COMP_TOTAL = COMP_ROWS * ROW_CELLS
+
+  local filledCells = math.floor(pct * COMP_TOTAL)
+  local bx = math.floor((w - COMP_W) / 2)  -- centered
+  if bx < 2 then bx = 2 end
+
+  -- Label centered above compartment
+  local shortL = #label > COMP_W and label:sub(1, COMP_W) or label
+  local labelOff = math.floor((COMP_W - #shortL) / 2)
+  if hasColor then monitor.setTextColor(WHITE) end
+  monitor.setCursorPos(bx + labelOff, RY)
+  monitor.write(shortL)
+  RY = RY + 1
+
+  -- Top border
+  monitor.setBackgroundColor(BG_EMPTY)
+  monitor.setTextColor(WHITE)
+  monitor.setCursorPos(bx, RY)
+  monitor.write("+" .. string.rep("-", COMP_INNER) .. "+")
+  RY = RY + 1
+
+  -- Fill rows
+  for row = 1, COMP_ROWS do
+    local rowFromBottom = COMP_ROWS - row + 1
+    local startCell = (rowFromBottom - 1) * ROW_CELLS
+    local fillInRow = math.min(math.max(0, filledCells - startCell), ROW_CELLS)
+    local emptyInRow = ROW_CELLS - fillInRow
+
+    monitor.setCursorPos(bx, RY)
+    monitor.setBackgroundColor(BG_BAR)
+    monitor.setTextColor(WHITE)
+    monitor.write("|")
+
+    if row == 1 then
+      monitor.write(ARROW_D)
+    elseif row == COMP_ROWS then
+    else
+      monitor.write(" ")
+    end
+
+    if row == COMP_ROWS then
+      if fillInRow > 0 then
+        monitor.setBackgroundColor(BG_STORAGE_FILL)
+        monitor.write(string.rep(" ", fillInRow))
+      end
+      if emptyInRow > 0 then
+        monitor.setBackgroundColor(BG_BAR)
+        monitor.write(string.rep(" ", emptyInRow))
+      end
+      monitor.setBackgroundColor(BG_BAR)
+      monitor.write(ARROW_U)
+    else
+      if fillInRow > 0 then
+        monitor.setBackgroundColor(BG_STORAGE_FILL)
+        monitor.write(string.rep(" ", fillInRow))
+      end
+      if emptyInRow > 0 then
+        monitor.setBackgroundColor(BG_BAR)
+        monitor.write(string.rep(" ", emptyInRow))
+      end
+    end
+
+    monitor.setBackgroundColor(BG_BAR)
+    monitor.write("|")
+    monitor.setBackgroundColor(BG_EMPTY)
+    RY = RY + 1
+  end
+
+  -- Bottom border with percentage
+  local pad = COMP_INNER - #pctStr
+  local pL = math.floor(pad / 2)
+  local pR = pad - pL
+  monitor.setBackgroundColor(BG_EMPTY)
+  monitor.setTextColor(WHITE)
+  monitor.setCursorPos(bx, RY)
+  monitor.write("+" .. string.rep("-", pL) .. pctStr .. string.rep("-", pR) .. "+")
   RY = RY + 2
 
-  -- Adaptive item widths: name = w/3, bar = w/3, count = remaining
+  -- ── Items list (adaptive widths) ──
   local nameW = math.floor(w / 3)
   local barW = math.floor(w / 3)
   local countW = w - nameW - barW - 4
 
-  -- Items
   local items = info.items or {}
   local maxCount = #items > 0 and items[1].count or 1
   for i = 1, math.min(10, #items) do
+    if RY >= h then break end
     local item = items[i]
     local iname = shortName(item.name) or "?"
     if #iname > nameW then iname = iname:sub(1, nameW) end
@@ -784,8 +900,8 @@ local function drawSiloDetail(info)
     monitor.setCursorPos(2, RY)
     if hasColor then monitor.setTextColor(WHITE) end
     monitor.write(iname)
-    local pad = nameW - #iname
-    if pad > 0 then monitor.write(string.rep(" ", pad)) end
+    local padN = nameW - #iname
+    if padN > 0 then monitor.write(string.rep(" ", padN)) end
 
     local countStr = tostring(item.count)
     if hasColor then monitor.setTextColor(LIGHT_GRAY) end
@@ -814,9 +930,8 @@ local function drawSiloDetail(info)
   if hasColor then monitor.setTextColor(GRAY) end
   monitor.setCursorPos(2, RY)
   monitor.write("Slots: " .. used .. "/" .. total)
-  local slotPct = math.min(used / total, 1.0)
   local slotBarW = 10
-  local sFill = math.floor(slotPct * slotBarW)
+  local sFill = math.floor(math.min(used / total, 1) * slotBarW)
   if hasColor then
     monitor.setBackgroundColor(BG_STORAGE_FILL)
     monitor.write(string.rep(" ", sFill))
@@ -824,7 +939,6 @@ local function drawSiloDetail(info)
     if slotBarW - sFill > 0 then monitor.write(string.rep(" ", slotBarW - sFill)) end
   end
   monitor.write("  Items: " .. totalItems)
-
 end
 
 -- ── Tank detail view ──

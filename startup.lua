@@ -501,40 +501,29 @@ end
 
 -- ── Storage tower drawing ──
 
-local COMP_W = 9          -- compartment outer width
-local COMP_INNER = 7      -- fillable width (inside ┌─┐)
-local COMP_ROWS = 6       -- fillable rows per compartment (was 2, now 3×)
-local ROW_CELLS = 6       -- fillable cells per row (7 inner - 1 reserved for arrow)
-local COMP_TOTAL = COMP_ROWS * ROW_CELLS  -- 36 cells per compartment
 local BG_BAR = colors.blue       -- custom #34414e via palette
 local BG_STORAGE_FILL = colors.purple  -- custom #485b6e via palette
 local RED_SQ_BG = colors.red
-local ARROW_U = string.char(30)  -- ▲ (CP437)
-local ARROW_D = string.char(31)  -- ▼ (CP437)
 
 local function drawStorageTower(cx, cy, siloInfos)
   -- siloInfos: array of { label, usedSlots, totalSlots, items }
   if #siloInfos == 0 then return cy end
 
-  -- Row 1: section header with red square
-  if hasColor then
-    monitor.setBackgroundColor(RED_SQ_BG)
-    monitor.setTextColor(WHITE)
-  end
-  monitor.setCursorPos(cx, cy)
-  monitor.write(" ")
-  monitor.setBackgroundColor(BG_EMPTY)
-  monitor.write(" Storages")
-  cy = cy + 1
+  -- Adaptive widths based on screen width
+  local nameW = math.floor((w - 2) / 3)
+  local barW = math.floor((w - 2) / 3)
+  local countW = w - cx - nameW - barW - 6  -- remaining for count + margins
+  if countW < 6 then countW = 6 end
+  local maxItems = math.max(1, math.min(10, h - cy - 4))  -- items per silo based on remaining height
 
   siloClickZones = {}
 
-  -- Compute total items / totals
   local totalItems = 0
   local totalUsed = 0
   local totalMax = 0
 
   for idx, info in ipairs(siloInfos) do
+    if cy >= h - 3 then break end
     local compStartY = cy
     local used = info.usedSlots or 0
     local total = info.totalSlots or 1
@@ -544,112 +533,65 @@ local function drawStorageTower(cx, cy, siloInfos)
       totalItems = totalItems + item.count
     end
 
-    local pct = math.min(used / total, 1.0)
-    local filledCells = math.floor(pct * COMP_TOTAL)
-    local pctStr = math.floor(pct * 100) .. "%"
-
-    -- Draw one compartment (9 rows: label, top, 6 fill, bottom)
-    local y = cy
-    local bx = cx + 2  -- indent for the compartment
-
-    -- Row A: label (short, centered)
+    -- Header: label + fill pct
     local label = info.label or ("#" .. (info.id or idx))
-    if #label > 7 then label = label:sub(1, 7) end
-    local labelOff = math.floor((COMP_W - #label) / 2)
-    if hasColor then monitor.setTextColor(WHITE) end
-    monitor.setCursorPos(bx + labelOff, y)
-    monitor.write(label)
-    y = y + 1
-
-    -- Row B: top border
-    monitor.setBackgroundColor(BG_EMPTY)
-    monitor.setTextColor(WHITE)
-    monitor.setCursorPos(bx, y)
-    monitor.write(tl .. string.rep(hz, COMP_INNER) .. tr)
-    y = y + 1
-
-    -- Fill rows: first has ▼, middle have space, last has ▲
-    for row = 1, COMP_ROWS do
-      local rowFromBottom = COMP_ROWS - row + 1  -- 6 = top, 1 = bottom
-      local startCell = (rowFromBottom - 1) * ROW_CELLS
-      local fillInRow = math.min(math.max(0, filledCells - startCell), ROW_CELLS)
-      local emptyInRow = ROW_CELLS - fillInRow
-
-      monitor.setCursorPos(bx, y)
-      monitor.setBackgroundColor(BG_BAR)
+    local pctStr = math.floor(math.min(used / total, 1) * 100) .. "%"
+    local headerW = w - cx
+    if hasColor then
+      monitor.setBackgroundColor(BG_STORAGE_FILL)
       monitor.setTextColor(WHITE)
-      monitor.write(vt)  -- left border
-
-      if row == 1 then
-        -- First (top) fill row: ▼ on left
-        monitor.write(ARROW_D)
-      elseif row == COMP_ROWS then
-        -- Last (bottom) fill row: ▲ on right, fill comes first
-        -- (handled below the same as other rows)
-      else
-        -- Middle rows: blank left
-        monitor.write(" ")
-      end
-
-      -- Fill area (all rows use BG_STORAGE_FILL instead of orange)
-      if row == COMP_ROWS then
-        -- Last row: fill first, then ▲
-        if fillInRow > 0 then
-          monitor.setBackgroundColor(BG_STORAGE_FILL)
-          monitor.write(string.rep(" ", fillInRow))
-        end
-        if emptyInRow > 0 then
-          monitor.setBackgroundColor(BG_BAR)
-          monitor.write(string.rep(" ", emptyInRow))
-        end
-        monitor.setBackgroundColor(BG_BAR)
-        monitor.write(ARROW_U)
-      else
-        -- First & middle rows: fill, then blank right
-        if fillInRow > 0 then
-          monitor.setBackgroundColor(BG_STORAGE_FILL)
-          monitor.write(string.rep(" ", fillInRow))
-        end
-        if emptyInRow > 0 then
-          monitor.setBackgroundColor(BG_BAR)
-          monitor.write(string.rep(" ", emptyInRow))
-        end
-      end
-
-      monitor.setBackgroundColor(BG_BAR)
-      monitor.write(vt)  -- right border
-      monitor.setBackgroundColor(BG_EMPTY)
-      y = y + 1
     end
-
-    -- Row F: bottom border with percentage
-    local pad = COMP_INNER - #pctStr
-    local pL = math.floor(pad / 2)
-    local pR = pad - pL
-
+    monitor.setCursorPos(cx, cy)
+    monitor.write(" " .. label)
+    local fillBarLen = math.max(0, headerW - #label - #pctStr - 4)
+    if fillBarLen > 0 then
+      local fill = math.floor(math.min(used / total, 1) * fillBarLen)
+      monitor.setBackgroundColor(BG_BAR)
+      monitor.write(string.rep(" ", fill))
+      monitor.setBackgroundColor(BG_EMPTY)
+      monitor.write(string.rep(" ", fillBarLen - fill))
+    end
+    monitor.setBackgroundColor(BG_STORAGE_FILL)
+    monitor.write(" " .. pctStr .. " ")
     monitor.setBackgroundColor(BG_EMPTY)
-    monitor.setTextColor(WHITE)
-    monitor.setCursorPos(bx, y)
-    monitor.write(bl .. string.rep(hz, pL) .. pctStr .. string.rep(hz, pR) .. br)
-    y = y + 1
-
-    cy = y  -- advance cy for next compartment
-    siloClickZones[#siloClickZones + 1] = { yStart = compStartY, yEnd = cy, info = info }
-  end
-
-  -- Total line(s)
-  local itemsLine = "Items: " .. totalItems
-  if hasColor then monitor.setTextColor(GRAY) end
-  monitor.setCursorPos(cx + 2, cy)
-  monitor.write(itemsLine)
-  cy = cy + 1
-
-  if totalMax > 0 then
-    local pctLine = math.floor(totalUsed / totalMax * 100) .. "% used"
-    if hasColor then monitor.setTextColor(GRAY) end
-    monitor.setCursorPos(cx + 2, cy)
-    monitor.write(pctLine)
     cy = cy + 1
+
+    -- Item rows
+    local sorted = info.items or {}
+    local maxItemCount = #sorted > 0 and sorted[1].count or 1
+    local shown = 0
+    for _, item in ipairs(sorted) do
+      if cy >= h - 1 then break end
+      if shown >= maxItems then break end
+      local iname = shortName(item.name) or "?"
+      if #iname > nameW then iname = iname:sub(1, nameW) end
+
+      monitor.setCursorPos(cx + 1, cy)
+      if hasColor then monitor.setTextColor(WHITE) end
+      monitor.write(iname)
+      local pad = nameW - #iname
+      if pad > 0 then monitor.write(string.rep(" ", pad)) end
+
+      local countStr = tostring(item.count)
+      monitor.write(string.rep(" ", countW - #countStr))
+      if hasColor then monitor.setTextColor(LIGHT_GRAY) end
+      monitor.write(countStr)
+
+      local fill = math.floor(math.min(item.count / maxItemCount, 1) * barW)
+      if hasColor then
+        monitor.setBackgroundColor(colors.gray)
+        monitor.write(string.rep(" ", fill))
+        monitor.setBackgroundColor(BG_EMPTY)
+        if barW - fill > 0 then monitor.write(string.rep(" ", barW - fill)) end
+      else
+        monitor.write(string.rep(" ", barW))
+      end
+      cy = cy + 1
+      shown = shown + 1
+    end
+    cy = cy + 1  -- spacer between silos
+
+    siloClickZones[#siloClickZones + 1] = { yStart = compStartY, yEnd = cy, info = info }
   end
 
   return cy

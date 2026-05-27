@@ -821,7 +821,7 @@ local function drawSiloDetail(info)
 
   -- ── Right panel: back button + top 10 items + stats ──
   local RX, RY = 27, 2
-  local maxNameW = 9
+  local maxNameW = 13
 
   -- Back button at top
   if hasColor then
@@ -844,16 +844,16 @@ local function drawSiloDetail(info)
   local maxCount = #items > 0 and items[1].count or 1
   for i = 1, math.min(10, #items) do
     local item = items[i]
-    local name = item.name or "?"
+    local name = shortName(item.name) or "?"
     if #name > maxNameW then name = name:sub(1, maxNameW) end
 
-    local barW = 4
+    local barW = 3
     local fill = math.floor(math.min(item.count / maxCount, 1) * barW)
     local empty = barW - fill
 
     if hasColor then monitor.setTextColor(WHITE) end
     monitor.setCursorPos(RX, RY)
-    monitor.write(string.format("%2d. %-9s%5d ", i, name, item.count))
+    monitor.write(string.format("%2d. %-13s%4d ", i, name, item.count))
 
     if hasColor then
       monitor.setBackgroundColor(colors.gray)
